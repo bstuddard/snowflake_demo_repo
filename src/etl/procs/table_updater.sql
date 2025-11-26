@@ -11,6 +11,7 @@ from snowflake.snowpark.row import Row
 class TableUpdater:
     def __init__(
         self,
+        session,
         table_name: str,
         database_name = 'learning_db',
         schema_name = 'dw',
@@ -21,23 +22,25 @@ class TableUpdater:
         """Updater class that upserts data from etl view to edw table
 
         Args:
+            session: Snowflake session object
             table_name (str): Name of the table (view name will be inferred)
         """
 
         # Infer base object names and calc audit columns
+        self.session = session
         self.table_name = table_name
         self.database_name = database_name
         self.schema_name = schema_name
         self.etl_schema_name = etl_schema_name
-        self.current_username = 'demo_user' # in actual env: session.sql("SELECT CURRENT_USER() AS current_user").collect()[0][0]
-        self.current_datetime_cst = session.sql("SELECT CONVERT_TIMEZONE('America/Los_Angeles', 'America/Chicago', CURRENT_TIMESTAMP())::TIMESTAMP_NTZ AS current_time_cst").collect()[0][0]
+        self.current_username = 'demo_user' # in actual env: self.session.sql("SELECT CURRENT_USER() AS current_user").collect()[0][0]
+        self.current_datetime_cst = self.session.sql("SELECT CONVERT_TIMEZONE('America/Los_Angeles', 'America/Chicago', CURRENT_TIMESTAMP())::TIMESTAMP_NTZ AS current_time_cst").collect()[0][0]
         self.full_table_name = f'{database_name}.{schema_name}.{self.table_name}'
         self.etl_view_name = f'{database_name}.{etl_schema_name}.vw_{self.table_name}'
         self.table_primary_key_column_name = f'{self.table_name}_key'
         self.updates_table_name = f'{database_name}.{etl_schema_name}.{self.table_name}_updates'
 
         # Full Column Listing
-        column_listing: list[Row] = session.sql(f"""
+        column_listing: list[Row] = self.session.sql(f"""
         SELECT COLUMN_NAME
         FROM INFORMATION_SCHEMA.COLUMNS
         WHERE
@@ -49,7 +52,7 @@ class TableUpdater:
         column_listing = [row.COLUMN_NAME.lower() for row in column_listing]
 
         # Determine primary keys and join strings
-        table_natural_keys_list: list[Row] = session.sql(f'SHOW PRIMARY KEYS IN TABLE {self.full_table_name}').collect()
+        table_natural_keys_list: list[Row] = self.session.sql(f'SHOW PRIMARY KEYS IN TABLE {self.full_table_name}').collect()
         self.table_natural_keys_list = [row.column_name.lower() for row in table_natural_keys_list]
         self.natural_key_join_string = ' AND '.join([f'source.{natural_key_column_name} = target.{natural_key_column_name}' for natural_key_column_name in self.table_natural_keys_list])
         self.update_table_columns = [column_name for column_name in column_listing if column_name not in (self.table_primary_key_column_name, 'create_username', 'create_datetime', 'last_update_username', 'last_update_datetime')]
@@ -79,7 +82,7 @@ class TableUpdater:
         OR source.etl_row_hash_value <> target.etl_row_hash_value
         """
         print(sql_string)
-        execution_results = session.sql(sql_string)
+        execution_results = self.session.sql(sql_string)
         execution_results.show()
 
         change_audit_sql_string = f"""
@@ -89,7 +92,7 @@ class TableUpdater:
         FROM {self.updates_table_name}
         """
         print(change_audit_sql_string)
-        session.sql(change_audit_sql_string).show()
+        self.session.sql(change_audit_sql_string).show()
 
 
     def process_table_updates(self):
@@ -103,7 +106,7 @@ class TableUpdater:
         {', '.join([f'target.{column_name} = source.{column_name}' for column_name in self.update_hash_columns])}
         """
         print(sql_string)
-        execution_results = session.sql(sql_string)
+        execution_results = self.session.sql(sql_string)
         execution_results.show()
 
 
@@ -118,14 +121,14 @@ class TableUpdater:
         VALUES ({', '.join([f'source.{col}'for col in self.insert_columns])})
         """
         print(sql_string)
-        execution_results = session.sql(sql_string)
+        execution_results = self.session.sql(sql_string)
         execution_results.show()
         
         
 def main(session, table_name: str) -> str:
 
     try:
-        updater = TableUpdater(table_name)
+        updater = TableUpdater(session, table_name)
         updater.identify_upserts()
         updater.process_table_updates()
         updater.process_table_inserts()
