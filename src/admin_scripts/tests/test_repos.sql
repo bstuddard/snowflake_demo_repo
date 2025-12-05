@@ -1,0 +1,8 @@
+USE DATABASE LEARNING_DB;
+USE SCHEMA ETL;
+
+SHOW GIT REPOSITORIES;
+
+DESCRIBE GIT REPOSITORY git_clone_repo;
+
+LS @git_clone_repo/branches/main/;
