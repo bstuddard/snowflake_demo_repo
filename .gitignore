@@ -212,3 +212,5 @@ keys/
 keys/*
 *.p8
 *.pem
+src/admin_scripts/streamlit/langgraph.zip
+src/admin_scripts/streamlit
