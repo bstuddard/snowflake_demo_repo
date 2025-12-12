@@ -41,3 +41,6 @@ DESCRIBE COMPUTE POOL container_compute_pool;
 -- Verify schema and objects
 SHOW IMAGE REPOSITORIES IN SCHEMA ai;
 SHOW STAGES IN SCHEMA ai;
+
+-- Verify images in the repository
+SHOW IMAGES IN IMAGE REPOSITORY container_repository;

@@ -23,16 +23,25 @@ SNOWFLAKE_WAREHOUSE = os.getenv("SNOWFLAKE_WAREHOUSE")
 
 def get_session_via_keypair():
     key_path = os.environ.get("SNOWFLAKE_PRIVATE_KEY_PATH")
+    key_path_2 = os.environ.get("SNOWFLAKE_PRIVATE_KEY_PATH_2")
     passphrase = os.environ.get("SNOWFLAKE_PRIVATE_KEY_PASSPHRASE")
     password = passphrase.encode() if passphrase else None
 
     # Load private key
-    with open(key_path, "rb") as key_file:
-        private_key = serialization.load_pem_private_key(
-            key_file.read(),
-            password=password,
-            backend=default_backend()
-        )
+    try:
+        with open(key_path, "rb") as key_file:
+            private_key = serialization.load_pem_private_key(
+                key_file.read(),
+                password=password,
+                backend=default_backend()
+            )
+    except:
+        with open(key_path_2, "rb") as key_file:
+            private_key = serialization.load_pem_private_key(
+                key_file.read(),
+                password=password,
+                backend=default_backend()
+            )
 
     # Convert to bytes format Snowflake expects
     pkb = private_key.private_bytes(

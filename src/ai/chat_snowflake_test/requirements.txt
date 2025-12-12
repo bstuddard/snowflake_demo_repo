@@ -4,3 +4,4 @@ snowflake-snowpark-python
 numpy
 langgraph
 langchain-snowflake==0.2.2
+streamlit
