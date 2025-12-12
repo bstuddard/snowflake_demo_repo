@@ -214,3 +214,4 @@ keys/*
 *.pem
 src/admin_scripts/streamlit/langgraph.zip
 src/admin_scripts/streamlit
+src/ai/chat_snowflake_test/.env
