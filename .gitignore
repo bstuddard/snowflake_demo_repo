@@ -213,6 +213,6 @@ keys/*
 *.p8
 *.pem
 src/admin_scripts/streamlit/langgraph.zip
-src/admin_scripts/streamlit
+src/admin_scripts/streamlit/upload_langgraph_guide.md
 src/ai/chat_snowflake_test/.env
 src/ai/chat_snowflake_test/docker_build/rsa_key_app_user.p8

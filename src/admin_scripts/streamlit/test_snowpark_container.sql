@@ -1,0 +1,16 @@
+CREATE COMPUTE POOL streamlit_compute_pool
+    MIN_NODES = 1
+    MAX_NODES = 1
+    INSTANCE_FAMILY = CPU_X64_XS;
+
+DESCRIBE COMPUTE POOL streamlit_compute_pool;
+
+CREATE STAGE LEARNING_DB.AI.STREAMLIT_APP_STAGE;
+
+CREATE STREAMLIT streamlit_test_container_app
+FROM '@LEARNING_DB.AI.STREAMLIT_APP_STAGE/app_folder'
+MAIN_FILE = 'app.py'
+RUNTIME_NAME = 'SYSTEM$ST_CONTAINER_RUNTIME_PY3_11'
+COMPUTE_POOL = streamlit_compute_pool
+QUERY_WAREHOUSE = container_warehouse
+;
