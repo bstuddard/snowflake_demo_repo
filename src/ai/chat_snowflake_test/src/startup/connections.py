@@ -111,6 +111,9 @@ def test_connection():
 
 def test_chat_snowflake_connection():
     with Session.builder.configs(get_connection_params()).create() as session:
+        # Explicitly activate the warehouse for Cortex calls
+        session.sql("USE WAREHOUSE container_warehouse").collect()
+
         model = ChatSnowflake(
             session=session, model="CLAUDE-3-7-SONNET", temperature=0.1, max_tokens=500
         )

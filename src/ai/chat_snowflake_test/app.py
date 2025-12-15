@@ -26,4 +26,7 @@ setup_streamlit_app(
 )
 logger.info('setup completed')
 
+test_connection()
+test_chat_snowflake_connection()
+
 display_streamlit_chat(st)

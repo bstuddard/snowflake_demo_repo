@@ -13,6 +13,10 @@ def get_model() -> tuple:
         tuple of ChatSnowflake, Session
     """
     session = Session.builder.configs(get_connection_params()).create()
+
+    # Explicitly activate the warehouse for Cortex calls
+    session.sql("USE WAREHOUSE container_warehouse").collect()
+
     model = ChatSnowflake(
         session=session,
         model="CLAUDE-3-7-SONNET",

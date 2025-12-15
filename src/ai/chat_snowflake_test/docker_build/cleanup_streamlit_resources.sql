@@ -19,6 +19,7 @@ USE WAREHOUSE container_warehouse;
 
 -- Step 1: Drop the service (stops service billing)
 -- =============================================================================
+ALTER SERVICE chat_snowflake_demo_service SUSPEND;
 DROP SERVICE IF EXISTS chat_snowflake_demo_service;
 
 -- Step 2: Suspend the compute pool (STOPS MAIN BILLING)
