@@ -119,3 +119,36 @@ def test_chat_snowflake_connection():
         )
         output = model.invoke('What is 2+2?')
         print(f'Response: {output.content}')
+
+
+def test_chat_snowflake_connection_streamlit_native():
+    """Streamlit running directly on a container compute pool will use a simpler auth method.
+    This is probably an ideal setup as it gets around having to publish up docker images.
+    """
+
+    import streamlit as st
+
+    st.connection("snowflake").reset()
+    conn = st.connection("snowflake")
+    session_instance = conn.session()
+    
+    with session_instance as session:
+        logger.info("Test started")
+        # Print out current session context information.
+        database = session.get_current_database()
+        schema = session.get_current_schema()
+        warehouse = session.get_current_warehouse()
+        role = session.get_current_role()
+        user = session.get_current_user()
+        logger.info(
+            f"Connection succeeded. Current session context: user={user}, database={database}, schema={schema}, warehouse={warehouse}, role={role}"
+        )
+
+        # Explicitly activate the warehouse for Cortex calls
+        session.sql("USE WAREHOUSE container_warehouse").collect()
+
+        model = ChatSnowflake(
+            session=session, model="CLAUDE-3-7-SONNET", temperature=0.1, max_tokens=500
+        )
+        output = model.invoke('What is 2+2?')
+        print(f'Response: {output.content}')
