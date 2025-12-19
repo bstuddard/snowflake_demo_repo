@@ -1,11 +1,3 @@
-CREATE OR REPLACE PROCEDURE etl.table_updater(table_name VARCHAR, batch_id VARCHAR DEFAULT NULL, type_1_column_names VARCHAR DEFAULT NULL)
-RETURNS VARCHAR
-LANGUAGE PYTHON
-RUNTIME_VERSION = '3.11'
-PACKAGES = ('snowflake-snowpark-python')
-HANDLER = 'main'
-AS
-$$
 import json
 import uuid
 from datetime import datetime
@@ -483,5 +475,3 @@ def main(session, table_name: str, batch_id: str | None = None, type_1_column_na
         except:
             pass  # Don't fail if logging itself fails
         raise e
-    
-$$;
