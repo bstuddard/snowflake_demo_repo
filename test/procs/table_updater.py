@@ -387,7 +387,9 @@ class TableUpdater:
         For Type 2 dimensions, this includes:
         1. Expiring current rows that have Type 2 changes
         2. Updating current rows with Type 1 changes
-        3. Updating historical rows with Type 1 changes (if type_1_column_names provided)
+        
+        Note: Type 1 historical updates are handled in process_table_inserts() AFTER
+        new rows are inserted, so the current row values are available.
         
         For other table types, simply updates rows marked as 'update'.
         """
@@ -407,9 +409,6 @@ class TableUpdater:
         execution_results = self.session.sql(sql_string).collect()
         self._log(f'table updates result: {self._format_df_result(execution_results)}')
 
-        if self.table_type == 'dim_type_2': 
-            self._process_type1_historical_updates()
-
 
     def process_table_inserts(self):
         """Insert new rows from the staging table.
@@ -417,6 +416,9 @@ class TableUpdater:
         Inserts rows marked as:
         - 'insert': Completely new records
         - 'type2_change': New version of record for Type 2 dimension changes
+        
+        For Type 2 dimensions, also updates historical rows with Type 1 changes
+        AFTER inserts complete (so the current row values are available).
         """
         sql_string = f"""
         MERGE INTO {self.full_table_name} as target
@@ -430,6 +432,10 @@ class TableUpdater:
         self._log(f'table inserts sql string: {sql_string}')
         execution_results = self.session.sql(sql_string).collect()
         self._log(f'table inserts result: {self._format_df_result(execution_results)}')
+
+        # Type 1 historical updates must run AFTER inserts so the new current row exists
+        if self.table_type == 'dim_type_2':
+            self._process_type1_historical_updates()
         
         
 def main(session, table_name: str, batch_id: str | None = None, type_1_column_names: str | None = None) -> str:
