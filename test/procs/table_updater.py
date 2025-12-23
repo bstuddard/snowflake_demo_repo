@@ -431,20 +431,67 @@ class TableUpdater:
         self._log(f'table inserts sql string: {sql_string}')
         execution_results = self.session.sql(sql_string).collect()
         self._log(f'table inserts result: {self._format_df_result(execution_results)}')
-        
-        
-def main(session, table_name: str, batch_id: str | None = None, type_1_column_names: str | None = None) -> str:
+
+
+    def process_table_deletes(self):
+        """Delete records from fact tables that no longer exist in source view.
+
+        Only runs for fact tables. Creates a staging table of records to delete,
+        then performs correlated subquery delete if any records found.
+
+        Fact tables may have records deleted from source systems that should
+        be removed from the data warehouse to maintain data accuracy.
+        """
+        # Assert table type is fact - dimensions should not be deleted
+        assert self.table_type == 'fact', f"Delete processing only supported for fact tables, not {self.table_type}"
+
+        # Create deletes staging table - records in target but not in source view
+        deletes_table_name = f'{self.database_name}.{self.etl_schema_name}.{self.table_name}_deletes'
+        sql_string = f"""
+        CREATE OR REPLACE TABLE {deletes_table_name} AS
+        SELECT target.{self.table_primary_key_column_name}
+        FROM {self.full_table_name} target
+        LEFT JOIN {self.etl_view_name} source
+            ON {self.natural_key_join_string}
+        WHERE source.etl_row_hash_value IS NULL
+        """
+        self._log(f'table deletes identification sql string: {sql_string}')
+        execution_results = self.session.sql(sql_string).collect()
+        self._log(f'table deletes identification result: {self._format_df_result(execution_results)}')
+
+        # Check if any records to delete
+        delete_count = self.session.sql(f"SELECT COUNT(*) as record_count FROM {deletes_table_name}").collect()[0][0]
+        self._log(f'Found {delete_count} records to delete')
+
+        if delete_count > 0:
+            # Perform correlated subquery delete
+            delete_sql = f"""
+            DELETE FROM {self.full_table_name}
+            WHERE EXISTS (
+                SELECT 1 FROM {deletes_table_name} d
+                WHERE d.{self.table_primary_key_column_name} = {self.full_table_name}.{self.table_primary_key_column_name}
+            )
+            """
+            self._log(f'table deletes sql string: {delete_sql}')
+            delete_results = self.session.sql(delete_sql).collect()
+            self._log(f'table deletes result: {self._format_df_result(delete_results)}')
+        else:
+            self._log(f'No records to delete from {self.full_table_name}')
+
+
+def main(session, table_name: str, batch_id: str | None = None, type_1_column_names: str | None = None, enable_deletes: bool = False) -> str:
     """Entry point for Snowflake stored procedure.
-    
+
     Args:
         session: Snowflake Snowpark session
         table_name: Name of the target table to update
         batch_id: Optional batch ID for traceability (auto-generated if not provided)
         type_1_column_names: Optional comma-separated Type 1 column names for Type 2 dimensions
-        
+        enable_deletes: Optional flag to enable deletion of records that no longer exist in source (fact tables only)
+
     Returns:
-        Summary string with insert/update/type2_change counts
-        
+        Summary string with insert/update/type2_change/delete counts
+
     Raises:
         Exception: Re-raises any exception after logging
     """
@@ -475,16 +522,35 @@ def main(session, table_name: str, batch_id: str | None = None, type_1_column_na
         if updater.table_type == 'dim_type_2':
             updater.process_type1_historical_updates()
 
+        # 6. Delete records that no longer exist in source (optional, fact tables only)
+        if enable_deletes and updater.table_type == 'fact':
+            updater.process_table_deletes()
+
         # Return a nice summary
-        summary = session.sql(f"""
-            SELECT 
+        summary_parts = []
+
+        # Get the basic counts from updates table
+        updates_summary = session.sql(f"""
+            SELECT
                 COALESCE(SUM(CASE WHEN insert_update_indicator = 'insert' THEN 1 ELSE 0 END),0) || ' inserts, ' ||
                 COALESCE(SUM(CASE WHEN insert_update_indicator = 'update' THEN 1 ELSE 0 END),0) || ' updates, ' ||
                 COALESCE(SUM(CASE WHEN insert_update_indicator = 'type2_change' THEN 1 ELSE 0 END),0) || ' type2 changes'
             FROM {updater.database_name}.{updater.etl_schema_name}.{table_name}_updates
         """).collect()[0][0]
+        summary_parts.append(updates_summary)
+
+        # Add delete count if deletes were enabled
+        if enable_deletes and updater.table_type == 'fact':
+            try:
+                deletes_count = session.sql(f"SELECT COUNT(*) FROM {updater.database_name}.{updater.etl_schema_name}.{table_name}_deletes").collect()[0][0]
+                summary_parts.append(f"{deletes_count} deletes")
+            except:
+                # If deletes table doesn't exist or query fails, just skip
+                pass
+
+        summary = ', '.join(summary_parts)
         updater._log(f'Completed, summary: {summary}')
-        
+
         return f"{table_name} completed — {summary}"
     except Exception as e:
         # Log the error before raising
