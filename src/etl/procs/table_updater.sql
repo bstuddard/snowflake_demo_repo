@@ -23,11 +23,15 @@ class TableUpdater:
         src_schema_name: str = 'src',
         etl_schema_name: str = 'etl',
         type_1_column_names: str | None = None
-
     ):
         """Updater class that upserts data from ETL view to data warehouse table.
-        
+
         Supports dimension tables (Type 1 and Type 2 SCD) and fact tables.
+
+        CRITICAL ASSUMPTIONS for Type 2 dimensions:
+        - etl_row_hash_value should include only Type 1 columns (excluding natural keys)
+        - etl_row_hash_value_2 should include only Type 2 columns (excluding natural keys)
+        - Violation can cause historical data corruption
 
         Args:
             session: Snowflake Snowpark session object
@@ -324,7 +328,7 @@ class TableUpdater:
         self._log(f'change audit result: {self._format_df_result(execution_results)}')
 
 
-    def _process_type2_expirations(self):
+    def process_type2_expirations(self):
         """Expire current records that have Type 2 changes.
         
         For rows marked as 'type2_change' in the staging table, sets:
@@ -354,13 +358,17 @@ class TableUpdater:
         self._log(f'type2 expirations result: {self._format_df_result(execution_results)}')
 
 
-    def _process_type1_historical_updates(self) -> None:
+    def process_type1_historical_updates(self) -> None:
         """Update historical rows to match current row for Type 1 columns.
-        
+
         For Type 2 dimensions, Type 1 changes should propagate to all historical rows.
-        Compares historical rows (current_row_flag = 0) against the current row 
+        Compares historical rows (current_row_flag = 0) against the current row
         (current_row_flag = 1) using etl_row_hash_value to detect differences.
-        
+
+        CRITICAL ASSUMPTION: etl_row_hash_value should be computed over only Type 1 columns
+        (excluding natural keys) in the ETL view. If it includes Type 2 columns, historical data
+        corruption can occur.
+
         Only runs if:
         - Table is dim_type_2
         - type_1_column_names was provided during initialization
@@ -390,21 +398,13 @@ class TableUpdater:
 
 
     def process_table_updates(self):
-        """Process all UPDATE operations from the staging table.
-        
-        For Type 2 dimensions, this includes:
-        1. Expiring current rows that have Type 2 changes
-        2. Updating current rows with Type 1 changes
-        
-        Note: Type 1 historical updates are handled in process_table_inserts() AFTER
-        new rows are inserted, so the current row values are available.
-        
-        For other table types, simply updates rows marked as 'update'.
+        """Process Type 1 UPDATE operations from the staging table.
+
+        Updates existing rows with Type 1 changes (in-place updates).
+        Type 2 expirations should be handled before calling this method.
+
+        For all table types, updates rows marked as 'update' in the staging table.
         """
-        # Handle Type 2 expirations first (if applicable)
-        if self.table_type == 'dim_type_2':
-            self._process_type2_expirations()
-        
         sql_string = f"""
         MERGE INTO {self.full_table_name} as target
         USING {self.updates_table_name} as source
@@ -420,13 +420,12 @@ class TableUpdater:
 
     def process_table_inserts(self):
         """Insert new rows from the staging table.
-        
+
         Inserts rows marked as:
         - 'insert': Completely new records
         - 'type2_change': New version of record for Type 2 dimension changes
-        
-        For Type 2 dimensions, also updates historical rows with Type 1 changes
-        AFTER inserts complete (so the current row values are available).
+
+        Type 1 historical updates should be handled after calling this method.
         """
         sql_string = f"""
         MERGE INTO {self.full_table_name} as target
@@ -435,15 +434,11 @@ class TableUpdater:
             {"AND target.current_row_flag = 1" if self.table_type == 'dim_type_2' else ""}
         WHEN NOT MATCHED AND source.insert_update_indicator IN ('insert', 'type2_change')
         THEN INSERT ({', '.join(self.insert_columns)})
-        VALUES ({', '.join([f'source.{col}'for col in self.insert_columns])})
+        VALUES ({', '.join([f'source.{col}' for col in self.insert_columns])})
         """
         self._log(f'table inserts sql string: {sql_string}')
         execution_results = self.session.sql(sql_string).collect()
         self._log(f'table inserts result: {self._format_df_result(execution_results)}')
-
-        # Type 1 historical updates must run AFTER inserts so the new current row exists
-        if self.table_type == 'dim_type_2':
-            self._process_type1_historical_updates()
         
         
 def main(session, table_name: str, batch_id: str | None = None, type_1_column_names: str | None = None) -> str:
@@ -467,9 +462,26 @@ def main(session, table_name: str, batch_id: str | None = None, type_1_column_na
     
     try:
         updater = TableUpdater(session, table_name, batch_id, type_1_column_names=type_1_column_names)
+
+        # ETL processing order is critical for Type 2 dimensions:
+        # 1. Identify changes → 2. Expire old versions → 3. Update current → 4. Insert new → 5. Update history
+
+        # 1. Identify what changes are needed
         updater.identify_upserts()
+
+        # 2. Expire old Type 2 versions (must happen before updates)
+        if updater.table_type == 'dim_type_2':
+            updater.process_type2_expirations()
+
+        # 3. Update existing rows with Type 1 changes
         updater.process_table_updates()
+
+        # 4. Insert new rows and Type 2 versions
         updater.process_table_inserts()
+
+        # 5. Propagate Type 1 changes to historical rows (must happen after inserts)
+        if updater.table_type == 'dim_type_2':
+            updater.process_type1_historical_updates()
 
         # Return a nice summary
         summary = session.sql(f"""
